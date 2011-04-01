@@ -5,7 +5,7 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProductVersion>9.0.30729</ProductVersion>
     <SchemaVersion>2.0</SchemaVersion>
-    <ProjectGuid>{B134AA80-D8CA-4B83-9775-AE6ED2D5CFAB}</ProjectGuid>
+    <ProjectGuid>{D0AD591B-0CE6-4A6D-8DEA-01777EE09BC3}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>MathNet.Numerics.MKLWrapperTests</RootNamespace>
@@ -41,7 +41,7 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <PlatformTarget>AnyCPU</PlatformTarget>
+    <PlatformTarget>x86</PlatformTarget>
     <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
@@ -51,11 +51,11 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <PlatformTarget>x64</PlatformTarget>
+    <PlatformTarget>x86</PlatformTarget>
     <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="MathNet.Numerics, Version=2011.2.14.756, Culture=neutral, PublicKeyToken=cd8b63ad3d691a37, processorArchitecture=MSIL">
+    <Reference Include="MathNet.Numerics, Version=2011.2.14.770, Culture=neutral, PublicKeyToken=cd8b63ad3d691a37, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\..\..\..\out\debug\Net40\MathNet.Numerics.dll</HintPath>
     </Reference>
@@ -80,12 +80,22 @@
     <Compile Include="..\..\..\UnitTests\AssertHelpers.cs">
       <Link>AssertHelpers.cs</Link>
     </Compile>
+    <Compile Include="..\..\..\UnitTests\LinearAlgebraProviderTests\Complex32\LinearAlgebraProviderTests.cs">
+      <Link>LinearAlgebra\Complex32\LinearAlgebraProviderTests.cs</Link>
+    </Compile>
+    <Compile Include="..\..\..\UnitTests\LinearAlgebraProviderTests\Complex\LinearAlgebraProviderTests.cs">
+      <Link>LinearAlgebra\Complex\LinearAlgebraProviderTests.cs</Link>
+    </Compile>
     <Compile Include="..\..\..\UnitTests\LinearAlgebraProviderTests\Double\LinearAlgebraProviderTests.cs">
       <Link>LinearAlgebra\Double\LinearAlgebraProviderTests.cs</Link>
     </Compile>
-    <Compile Include="..\MKLWrapper32Tests\LinearAlgebra\Double\MklLinearAlgebraProviderTests.cs">
-      <Link>LinearAlgebra\Double\MklLinearAlgebraProviderTests.cs</Link>
+    <Compile Include="..\..\..\UnitTests\LinearAlgebraProviderTests\Single\LinearAlgebraProviderTests.cs">
+      <Link>LinearAlgebra\Single\LinearAlgebraProviderTests.cs</Link>
     </Compile>
+    <Compile Include="LinearAlgebra\Complex32\MklLinearAlgebraProviderTests.cs" />
+    <Compile Include="LinearAlgebra\Complex\MklLinearAlgebraProviderTests.cs" />
+    <Compile Include="LinearAlgebra\Double\MklLinearAlgebraProviderTests.cs" />
+    <Compile Include="LinearAlgebra\Single\MklLinearAlgebraProviderTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -106,13 +116,16 @@
     </BootstrapperPackage>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="..\x64\Debug\libiomp5md.dll">
+    <Content Include="..\Win32\Debug\libiomp5md.dll">
       <Link>libiomp5md.dll</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <Content Include="..\x64\Debug\MathNET.Numerics.MKL.dll">
+    <Content Include="..\Win32\Debug\MathNET.Numerics.MKL.dll">
       <Link>MathNET.Numerics.MKL.dll</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

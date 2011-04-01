@@ -28,9 +28,9 @@
 // OTHER DEALINGS IN THE SOFTWARE.
 // </copyright>
 
-using MathNet.Numerics.UnitTests.LinearAlgebraProviderTests.Double; 
+using MathNet.Numerics.UnitTests.LinearAlgebraProviderTests.Complex; 
 
-namespace MathNet.Numerics.MklWrapperTests.LinearAlgebra.Double
+namespace MathNet.Numerics.MklWrapperTests.LinearAlgebra.Complex
 {
     using NUnit.Framework;
 
@@ -45,7 +45,7 @@ namespace MathNet.Numerics.MklWrapperTests.LinearAlgebra.Double
         /// </summary>
         public MklLinearAlgebraProviderTests()
          {
-             Provider = new Algorithms.LinearAlgebra.Mkl.MklLinearAlgebraProvider();
+             Control.LinearAlgebraProvider = new Algorithms.LinearAlgebra.Mkl.MklLinearAlgebraProvider();
          }
     }
 }

@@ -59,11 +59,6 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
                 throw new ArgumentException(Resources.ArgumentVectorsSameLength);
             }
 
-            if (alpha == 0.0F)
-            {
-                return;
-            }
-
             if (alpha.IsZero())
             {
                 CommonParallel.For(0, y.Length, index => result[index] = y[index]);
@@ -461,9 +456,9 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
         /// <param name="c">The c matrix.</param>
         public virtual void MatrixMultiplyWithUpdate(Transpose transposeA, Transpose transposeB, Complex32 alpha, Complex32[] a, int rowsA, int columnsA, Complex32[] b, int rowsB, int columnsB, Complex32 beta, Complex32[] c)
         {
-            // Choose nonsensical values for the number of rows in c; fill them in depending
-            // on the operations on a and b.
-            int rowsC;
+            int m; // The number of rows of matrix op(A) and of the matrix C.
+            int n; // The number of columns of matrix op(B) and of the matrix C.
+            int k; // The number of columns of matrix op(A) and the rows of the matrix op(B). 
 
             // First check some basic requirement on the parameters of the matrix multiplication.
             if (a == null)
@@ -488,7 +483,9 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
                     throw new ArgumentOutOfRangeException();
                 }
 
-                rowsC = columnsA;
+                m = columnsA;
+                n = rowsB;
+                k = rowsA;
             }
             else if ((int)transposeA > 111)
             {
@@ -502,7 +499,9 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
                     throw new ArgumentOutOfRangeException();
                 }
 
-                rowsC = columnsA;
+                m = columnsA;
+                n = columnsB;
+                k = rowsA;
             }
             else if ((int)transposeB > 111)
             {
@@ -516,7 +515,9 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
                     throw new ArgumentOutOfRangeException();
                 }
 
-                rowsC = rowsA;
+                m = rowsA;
+                n = rowsB;
+                k = columnsA;
             }
             else
             {
@@ -530,7 +531,9 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
                     throw new ArgumentOutOfRangeException();
                 }
 
-                rowsC = rowsA;
+                m = rowsA;
+                n = columnsB;
+                k = columnsA;
             }
 
             if (alpha.IsZero() && beta.IsZero())
@@ -562,268 +565,271 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
                 bdata = b;
             }
 
-            if (alpha.IsOne())
+            if (beta.IsZero())
             {
-                if (beta.IsZero())
+                Array.Clear(c, 0, c.Length);
+            }
+            else if (!beta.IsOne())
+            {
+                Control.LinearAlgebraProvider.ScaleArray(beta, c, c);
+            }
+
+            if (alpha.IsZero())
+            {
+                return;
+            }
+
+            CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, adata, 0, 0, bdata, 0, 0, c, 0, 0, m, n, k, m, n, k, true);
+        }
+
+        /// <summary>
+        /// Cache-Oblivious Matrix Multiplication
+        /// </summary>
+        /// <param name="transposeA">if set to <c>true</c> transpose matrix A.</param>
+        /// <param name="transposeB">if set to <c>true</c> transpose matrix B.</param>
+        /// <param name="alpha">The value to scale the matrix A with.</param>
+        /// <param name="matrixA">The matrix A.</param>
+        /// <param name="shiftArow">Row-shift of the left matrix</param>
+        /// <param name="shiftAcol">Column-shift of the left matrix</param>
+        /// <param name="matrixB">The matrix B.</param>
+        /// <param name="shiftBrow">Row-shift of the right matrix</param>
+        /// <param name="shiftBcol">Column-shift of the right matrix</param>
+        /// <param name="result">The matrix C.</param>
+        /// <param name="shiftCrow">Row-shift of the result matrix</param>
+        /// <param name="shiftCcol">Column-shift of the result matrix</param>
+        /// <param name="m">The number of rows of matrix op(A) and of the matrix C.</param>
+        /// <param name="n">The number of columns of matrix op(B) and of the matrix C.</param>
+        /// <param name="k">The number of columns of matrix op(A) and the rows of the matrix op(B).</param>
+        /// <param name="constM">The constant number of rows of matrix op(A) and of the matrix C.</param>
+        /// <param name="constN">The constant number of columns of matrix op(B) and of the matrix C.</param>
+        /// <param name="constK">The constant number of columns of matrix op(A) and the rows of the matrix op(B).</param>
+        /// <param name="first">Indicates if this is the first recursion.</param>
+        private static void CacheObliviousMatrixMultiply(Transpose transposeA, Transpose transposeB, Complex32 alpha, Complex32[] matrixA, int shiftArow, int shiftAcol, Complex32[] matrixB, int shiftBrow, int shiftBcol, Complex32[] result, int shiftCrow, int shiftCcol, int m, int n, int k, int constM, int constN, int constK, bool first)
+        {
+            if (m + n + k <= Control.ParallelizeOrder)
+            {
+                if ((int)transposeA > 111 && (int)transposeB > 111)
                 {
-                    if ((int)transposeA > 111 && (int)transposeB > 111)
+                    if ((int)transposeA > 112 && (int)transposeB > 112)
                     {
-                        CommonParallel.For(
-                            0,
-                            columnsA,
-                            j =>
+                        for (var m1 = 0; m1 < m; m1++)
+                        {
+                            var matArowPos = m1 + shiftArow;
+                            var matCrowPos = m1 + shiftCrow;
+                            for (var n1 = 0; n1 < n; ++n1)
                             {
-                                var jIndex = j * rowsC;
-                                for (var i = 0; i != rowsB; i++)
+                                var matBcolPos = n1 + shiftBcol;
+                                var sum = Complex32.Zero;
+                                for (var k1 = 0; k1 < k; ++k1)
                                 {
-                                    var iIndex = i * rowsA;
-                                    Complex32 s = 0;
-                                    for (var l = 0; l != columnsB; l++)
-                                    {
-                                        s += adata[iIndex + l] * bdata[(l * rowsB) + j];
-                                    }
-
-                                    c[jIndex + i] = s;
+                                    sum += matrixA[(matArowPos * constK) + k1 + shiftAcol].Conjugate() *
+                                           matrixB[((k1 + shiftBrow) * constN) + matBcolPos].Conjugate();
                                 }
-                            });
+
+                                result[((n1 + shiftCcol) * constM) + matCrowPos] += alpha * sum;
+                            }
+                        }
                     }
-                    else if ((int)transposeA > 111)
+                    else if ((int)transposeA > 112)
                     {
-                        CommonParallel.For(
-                            0,
-                            columnsB,
-                            j =>
+                        for (var m1 = 0; m1 < m; m1++)
+                        {
+                            var matArowPos = m1 + shiftArow;
+                            var matCrowPos = m1 + shiftCrow;
+                            for (var n1 = 0; n1 < n; ++n1)
                             {
-                                var jcIndex = j * rowsC;
-                                var jbIndex = j * rowsB;
-                                for (var i = 0; i != columnsA; i++)
+                                var matBcolPos = n1 + shiftBcol;
+                                var sum = Complex32.Zero;
+                                for (var k1 = 0; k1 < k; ++k1)
                                 {
-                                    var iIndex = i * rowsA;
-                                    Complex32 s = 0;
-                                    for (var l = 0; l != rowsA; l++)
-                                    {
-                                        s += adata[iIndex + l] * bdata[jbIndex + l];
-                                    }
-
-                                    c[jcIndex + i] = s;
+                                    sum += matrixA[(matArowPos * constK) + k1 + shiftAcol].Conjugate() *
+                                           matrixB[((k1 + shiftBrow) * constN) + matBcolPos];
                                 }
-                            });
+
+                                result[((n1 + shiftCcol) * constM) + matCrowPos] += alpha * sum;
+                            }
+                        }
                     }
-                    else if ((int)transposeB > 111)
+                    else if ((int)transposeB > 112)
                     {
-                        CommonParallel.For(
-                            0,
-                            rowsB,
-                            j =>
+                        for (var m1 = 0; m1 < m; m1++)
+                        {
+                            var matArowPos = m1 + shiftArow;
+                            var matCrowPos = m1 + shiftCrow;
+                            for (var n1 = 0; n1 < n; ++n1)
                             {
-                                var jIndex = j * rowsC;
-                                for (var i = 0; i != rowsA; i++)
+                                var matBcolPos = n1 + shiftBcol;
+                                var sum = Complex32.Zero;
+                                for (var k1 = 0; k1 < k; ++k1)
                                 {
-                                    Complex32 s = 0;
-                                    for (var l = 0; l != columnsA; l++)
-                                    {
-                                        s += adata[(l * rowsA) + i] * bdata[(l * rowsB) + j];
-                                    }
-
-                                    c[jIndex + i] = s;
+                                    sum += matrixA[(matArowPos * constK) + k1 + shiftAcol] *
+                                           matrixB[((k1 + shiftBrow) * constN) + matBcolPos].Conjugate();
                                 }
-                            });
+
+                                result[((n1 + shiftCcol) * constM) + matCrowPos] += alpha * sum;
+                            }
+                        }
                     }
                     else
                     {
-                        CommonParallel.For(
-                            0,
-                            columnsB,
-                            j =>
+                        for (var m1 = 0; m1 < m; m1++)
+                        {
+                            var matArowPos = m1 + shiftArow;
+                            var matCrowPos = m1 + shiftCrow;
+                            for (var n1 = 0; n1 < n; ++n1)
                             {
-                                var jcIndex = j * rowsC;
-                                var jbIndex = j * rowsB;
-                                for (var i = 0; i != rowsA; i++)
+                                var matBcolPos = n1 + shiftBcol;
+                                var sum = Complex32.Zero;
+                                for (var k1 = 0; k1 < k; ++k1)
                                 {
-                                    Complex32 s = 0;
-                                    for (var l = 0; l != columnsA; l++)
-                                    {
-                                        s += adata[(l * rowsA) + i] * bdata[jbIndex + l];
-                                    }
-
-                                    c[jcIndex + i] = s;
+                                    sum += matrixA[(matArowPos * constK) + k1 + shiftAcol] *
+                                           matrixB[((k1 + shiftBrow) * constN) + matBcolPos];
                                 }
-                            });
+
+                                result[((n1 + shiftCcol) * constM) + matCrowPos] += alpha * sum;
+                            }
+                        }
+                    }
+                }
+                else if ((int)transposeA > 111)
+                {
+                    if ((int)transposeA > 112)
+                    {
+                        for (var m1 = 0; m1 < m; m1++)
+                        {
+                            var matArowPos = m1 + shiftArow;
+                            var matCrowPos = m1 + shiftCrow;
+                            for (var n1 = 0; n1 < n; ++n1)
+                            {
+                                var matBcolPos = n1 + shiftBcol;
+                                var sum = Complex32.Zero;
+                                for (var k1 = 0; k1 < k; ++k1)
+                                {
+                                    sum += matrixA[(matArowPos * constK) + k1 + shiftAcol].Conjugate() *
+                                           matrixB[(matBcolPos * constK) + k1 + shiftBrow];
+                                }
+
+                                result[((n1 + shiftCcol) * constM) + matCrowPos] += alpha * sum;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for (var m1 = 0; m1 < m; m1++)
+                        {
+                            var matArowPos = m1 + shiftArow;
+                            var matCrowPos = m1 + shiftCrow;
+                            for (var n1 = 0; n1 < n; ++n1)
+                            {
+                                var matBcolPos = n1 + shiftBcol;
+                                var sum = Complex32.Zero;
+                                for (var k1 = 0; k1 < k; ++k1)
+                                {
+                                    sum += matrixA[(matArowPos * constK) + k1 + shiftAcol] *
+                                           matrixB[(matBcolPos * constK) + k1 + shiftBrow];
+                                }
+
+                                result[((n1 + shiftCcol) * constM) + matCrowPos] += alpha * sum;
+                            }
+                        }
+                    }
+                }
+                else if ((int)transposeB > 111)
+                {
+                    if ((int)transposeB > 112)
+                    {
+                        for (var m1 = 0; m1 < m; m1++)
+                        {
+                            var matArowPos = m1 + shiftArow;
+                            var matCrowPos = m1 + shiftCrow;
+                            for (var n1 = 0; n1 < n; ++n1)
+                            {
+                                var matBcolPos = n1 + shiftBcol;
+                                var sum = Complex32.Zero;
+                                for (var k1 = 0; k1 < k; ++k1)
+                                {
+                                    sum += matrixA[((k1 + shiftAcol) * constM) + matArowPos] *
+                                           matrixB[((k1 + shiftBrow) * constN) + matBcolPos].Conjugate();
+                                }
+
+                                result[((n1 + shiftCcol) * constM) + matCrowPos] += alpha * sum;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for (var m1 = 0; m1 < m; m1++)
+                        {
+                            var matArowPos = m1 + shiftArow;
+                            var matCrowPos = m1 + shiftCrow;
+                            for (var n1 = 0; n1 < n; ++n1)
+                            {
+                                var matBcolPos = n1 + shiftBcol;
+                                var sum = Complex32.Zero;
+                                for (var k1 = 0; k1 < k; ++k1)
+                                {
+                                    sum += matrixA[((k1 + shiftAcol) * constM) + matArowPos] *
+                                           matrixB[((k1 + shiftBrow) * constN) + matBcolPos];
+                                }
+
+                                result[((n1 + shiftCcol) * constM) + matCrowPos] += alpha * sum;
+                            }
+                        }
                     }
                 }
                 else
                 {
-                    if ((int)transposeA > 111 && (int)transposeB > 111)
+                    for (var m1 = 0; m1 < m; m1++)
                     {
-                        CommonParallel.For(
-                            0,
-                            columnsA,
-                            j =>
+                        var matArowPos = m1 + shiftArow;
+                        var matCrowPos = m1 + shiftCrow;
+                        for (var n1 = 0; n1 < n; ++n1)
+                        {
+                            var matBcolPos = n1 + shiftBcol;
+                            var sum = Complex32.Zero;
+                            for (var k1 = 0; k1 < k; ++k1)
                             {
-                                var jIndex = j * rowsC;
-                                for (var i = 0; i != rowsB; i++)
-                                {
-                                    var iIndex = i * rowsA;
-                                    Complex32 s = 0;
-                                    for (var l = 0; l != columnsB; l++)
-                                    {
-                                        s += adata[iIndex + l] * bdata[(l * rowsB) + j];
-                                    }
+                                sum += matrixA[((k1 + shiftAcol) * constM) + matArowPos] *
+                                       matrixB[(matBcolPos * constK) + k1 + shiftBrow];
+                            }
 
-                                    c[jIndex + i] = (c[jIndex + i] * beta) + s;
-                                }
-                            });
-                    }
-                    else if ((int)transposeA > 111)
-                    {
-                        CommonParallel.For(
-                            0,
-                            columnsB,
-                            j =>
-                            {
-                                var jcIndex = j * rowsC;
-                                var jbIndex = j * rowsB;
-                                for (var i = 0; i != columnsA; i++)
-                                {
-                                    var iIndex = i * rowsA;
-                                    Complex32 s = 0;
-                                    for (var l = 0; l != rowsA; l++)
-                                    {
-                                        s += adata[iIndex + l] * bdata[jbIndex + l];
-                                    }
-
-                                    c[jcIndex + i] = s + (c[jcIndex + i] * beta);
-                                }
-                            });
-                    }
-                    else if ((int)transposeB > 111)
-                    {
-                        CommonParallel.For(
-                            0,
-                            rowsB,
-                            j =>
-                            {
-                                var jIndex = j * rowsC;
-                                for (var i = 0; i != rowsA; i++)
-                                {
-                                    Complex32 s = 0;
-                                    for (var l = 0; l != columnsA; l++)
-                                    {
-                                        s += adata[(l * rowsA) + i] * bdata[(l * rowsB) + j];
-                                    }
-
-                                    c[jIndex + i] = s + (c[jIndex + i] * beta);
-                                }
-                            });
-                    }
-                    else
-                    {
-                        CommonParallel.For(
-                            0,
-                            columnsB,
-                            j =>
-                            {
-                                var jcIndex = j * rowsC;
-                                var jbIndex = j * rowsB;
-                                for (var i = 0; i != rowsA; i++)
-                                {
-                                    Complex32 s = 0;
-                                    for (var l = 0; l != columnsA; l++)
-                                    {
-                                        s += adata[(l * rowsA) + i] * bdata[jbIndex + l];
-                                    }
-
-                                    c[jcIndex + i] = s + (c[jcIndex + i] * beta);
-                                }
-                            });
+                            result[((n1 + shiftCcol) * constM) + matCrowPos] += alpha * sum;
+                        }
                     }
                 }
             }
             else
             {
-                if ((int)transposeA > 111 && (int)transposeB > 111)
-                {
-                    CommonParallel.For(
-                        0,
-                        columnsA,
-                        j =>
-                        {
-                            var jIndex = j * rowsC;
-                            for (var i = 0; i != rowsB; i++)
-                            {
-                                var iIndex = i * rowsA;
-                                Complex32 s = 0;
-                                for (var l = 0; l != columnsB; l++)
-                                {
-                                    s += adata[iIndex + l] * bdata[(l * rowsB) + j];
-                                }
+                // divide and conquer
+                int m2 = m / 2, n2 = n / 2, k2 = k / 2;
 
-                                c[jIndex + i] = (c[jIndex + i] * beta) + (alpha * s);
-                            }
-                        });
-                }
-                else if ((int)transposeA > 111)
+                if (first)
                 {
-                    CommonParallel.For(
-                        0,
-                        columnsB,
-                        j =>
-                        {
-                            var jcIndex = j * rowsC;
-                            var jbIndex = j * rowsB;
-                            for (var i = 0; i != columnsA; i++)
-                            {
-                                var iIndex = i * rowsA;
-                                Complex32 s = 0;
-                                for (var l = 0; l != rowsA; l++)
-                                {
-                                    s += adata[iIndex + l] * bdata[jbIndex + l];
-                                }
+                    CommonParallel.Invoke(
+                        () => CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow, shiftAcol, matrixB, shiftBrow, shiftBcol, result, shiftCrow, shiftCcol, m2, n2, k2, constM, constN, constK, false),
+                        () => CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow, shiftAcol, matrixB, shiftBrow, shiftBcol + n2, result, shiftCrow, shiftCcol + n2, m2, n - n2, k2, constM, constN, constK, false),
+                        () => CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow, shiftAcol + k2, matrixB, shiftBrow + k2, shiftBcol, result, shiftCrow, shiftCcol, m2, n2, k - k2, constM, constN, constK, false),
+                        () => CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow, shiftAcol + k2, matrixB, shiftBrow + k2, shiftBcol + n2, result, shiftCrow, shiftCcol + n2, m2, n - n2, k - k2, constM, constN, constK, false));
 
-                                c[jcIndex + i] = (alpha * s) + (c[jcIndex + i] * beta);
-                            }
-                        });
-                }
-                else if ((int)transposeB > 111)
-                {
-                    CommonParallel.For(
-                        0,
-                        rowsB,
-                        j =>
-                        {
-                            var jIndex = j * rowsC;
-                            for (var i = 0; i != rowsA; i++)
-                            {
-                                Complex32 s = 0;
-                                for (var l = 0; l != columnsA; l++)
-                                {
-                                    s += adata[(l * rowsA) + i] * bdata[(l * rowsB) + j];
-                                }
-
-                                c[jIndex + i] = (alpha * s) + (c[jIndex + i] * beta);
-                            }
-                        });
+                    CommonParallel.Invoke(
+                        () => CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow + m2, shiftAcol, matrixB, shiftBrow, shiftBcol, result, shiftCrow + m2, shiftCcol, m - m2, n2, k2, constM, constN, constK, false),
+                        () => CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow + m2, shiftAcol, matrixB, shiftBrow, shiftBcol + n2, result, shiftCrow + m2, shiftCcol + n2, m - m2, n - n2, k2, constM, constN, constK, false),
+                        () => CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow + m2, shiftAcol + k2, matrixB, shiftBrow + k2, shiftBcol, result, shiftCrow + m2, shiftCcol, m - m2, n2, k - k2, constM, constN, constK, false),
+                        () => CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow + m2, shiftAcol + k2, matrixB, shiftBrow + k2, shiftBcol + n2, result, shiftCrow + m2, shiftCcol + n2, m - m2, n - n2, k - k2, constM, constN, constK, false));
                 }
                 else
                 {
-                    CommonParallel.For(
-                        0,
-                        columnsB,
-                        j =>
-                        {
-                            var jcIndex = j * rowsC;
-                            var jbIndex = j * rowsB;
-                            for (var i = 0; i != rowsA; i++)
-                            {
-                                Complex32 s = 0;
-                                for (var l = 0; l != columnsA; l++)
-                                {
-                                    s += adata[(l * rowsA) + i] * bdata[jbIndex + l];
-                                }
+                    CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow, shiftAcol, matrixB, shiftBrow, shiftBcol, result, shiftCrow, shiftCcol, m2, n2, k2, constM, constN, constK, false);
+                    CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow, shiftAcol, matrixB, shiftBrow, shiftBcol + n2, result, shiftCrow, shiftCcol + n2, m2, n - n2, k2, constM, constN, constK, false);
 
-                                c[jcIndex + i] = (alpha * s) + (c[jcIndex + i] * beta);
-                            }
-                        });
+                    CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow, shiftAcol + k2, matrixB, shiftBrow + k2, shiftBcol, result, shiftCrow, shiftCcol, m2, n2, k - k2, constM, constN, constK, false);
+                    CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow, shiftAcol + k2, matrixB, shiftBrow + k2, shiftBcol + n2, result, shiftCrow, shiftCcol + n2, m2, n - n2, k - k2, constM, constN, constK, false);
+
+                    CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow + m2, shiftAcol, matrixB, shiftBrow, shiftBcol, result, shiftCrow + m2, shiftCcol, m - m2, n2, k2, constM, constN, constK, false);
+                    CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow + m2, shiftAcol, matrixB, shiftBrow, shiftBcol + n2, result, shiftCrow + m2, shiftCcol + n2, m - m2, n - n2, k2, constM, constN, constK, false);
+
+                    CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow + m2, shiftAcol + k2, matrixB, shiftBrow + k2, shiftBcol, result, shiftCrow + m2, shiftCcol, m - m2, n2, k - k2, constM, constN, constK, false);
+                    CacheObliviousMatrixMultiply(transposeA, transposeB, alpha, matrixA, shiftArow + m2, shiftAcol + k2, matrixB, shiftBrow + k2, shiftBcol + n2, result, shiftCrow + m2, shiftCcol + n2, m - m2, n - n2, k - k2, constM, constN, constK, false);
                 }
             }
         }
@@ -1568,128 +1574,144 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
         /// <summary>
         /// Solves A*X=B for X using QR factorization of A.
         /// </summary>
-        /// <param name="r">On entry, it is the M by N A matrix to factor. On exit,
-        /// it is overwritten with the R matrix of the QR factorization. </param>
-        /// <param name="rowsR">The number of rows in the A matrix.</param>
-        /// <param name="columnsR">The number of columns in the A matrix.</param>
-        /// <param name="q">On exit, A M by M matrix that holds the Q matrix of the 
-        /// QR factorization.</param>
+        /// <param name="a">The A matrix.</param>
+        /// <param name="rows">The number of rows in the A matrix.</param>
+        /// <param name="columns">The number of columns in the A matrix.</param>
         /// <param name="b">The B matrix.</param>
         /// <param name="columnsB">The number of columns of B.</param>
         /// <param name="x">On exit, the solution matrix.</param>
-        public virtual void QRSolve(Complex32[] r, int rowsR, int columnsR, Complex32[] q, Complex32[] b, int columnsB, Complex32[] x)
+        /// <remarks>Rows must be greater or equal to columns.</remarks>
+        public virtual void QRSolve(Complex32[] a, int rows, int columns, Complex32[] b, int columnsB, Complex32[] x)
         {
-            if (r == null)
+            if (a == null)
             {
-                throw new ArgumentNullException("r");
-            }
-
-            if (q == null)
-            {
-                throw new ArgumentNullException("q");
+                throw new ArgumentNullException("a");
             }
 
             if (b == null)
             {
-                throw new ArgumentNullException("q");
+                throw new ArgumentNullException("b");
             }
 
             if (x == null)
             {
-                throw new ArgumentNullException("q");
+                throw new ArgumentNullException("x");
             }
 
-            if (r.Length != rowsR * columnsR)
+            if (a.Length != rows * columns)
             {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "r");
+                throw new ArgumentException(Resources.ArgumentArraysSameLength, "a");
             }
 
-            if (q.Length != rowsR * rowsR)
-            {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "q");
-            }
-
-            if (b.Length != rowsR * columnsB)
+            if (b.Length != rows * columnsB)
             {
                 throw new ArgumentException(Resources.ArgumentArraysSameLength, "b");
             }
 
-            if (x.Length != columnsR * columnsB)
+            if (x.Length != columns * columnsB)
             {
                 throw new ArgumentException(Resources.ArgumentArraysSameLength, "x");
             }
 
-            var work = new Complex32[rowsR * rowsR];
-            QRSolve(r, rowsR, columnsR, q, b, columnsB, x, work);
+            if (rows < columns)
+            {
+                throw new ArgumentException(Resources.RowsLessThanColumns);
+            }
+
+            var work = new Complex32[rows * rows];
+            QRSolve(a, rows, columns, b, columnsB, x, work);
         }
 
         /// <summary>
         /// Solves A*X=B for X using QR factorization of A.
         /// </summary>
-        /// <param name="r">On entry, it is the M by N A matrix to factor. On exit,
-        /// it is overwritten with the R matrix of the QR factorization. </param>
-        /// <param name="rowsR">The number of rows in the A matrix.</param>
-        /// <param name="columnsR">The number of columns in the A matrix.</param>
-        /// <param name="q">On exit, A M by M matrix that holds the Q matrix of the 
-        /// QR factorization.</param>
+        /// <param name="a">The A matrix.</param>
+        /// <param name="rows">The number of rows in the A matrix.</param>
+        /// <param name="columns">The number of columns in the A matrix.</param>
         /// <param name="b">The B matrix.</param>
         /// <param name="columnsB">The number of columns of B.</param>
         /// <param name="x">On exit, the solution matrix.</param>
         /// <param name="work">The work array. The array must have a length of at least N,
         /// but should be N*blocksize. The blocksize is machine dependent. On exit, work[0] contains the optimal
         /// work size value.</param>
-        public virtual void QRSolve(Complex32[] r, int rowsR, int columnsR, Complex32[] q, Complex32[] b, int columnsB, Complex32[] x, Complex32[] work)
+        /// <remarks>Rows must be greater or equal to columns.</remarks>
+        public virtual void QRSolve(Complex32[] a, int rows, int columns, Complex32[] b, int columnsB, Complex32[] x, Complex32[] work)
         {
-            if (r == null)
+            if (a == null)
             {
-                throw new ArgumentNullException("r");
-            }
-
-            if (q == null)
-            {
-                throw new ArgumentNullException("q");
+                throw new ArgumentNullException("a");
             }
 
             if (b == null)
             {
-                throw new ArgumentNullException("q");
+                throw new ArgumentNullException("b");
             }
 
             if (x == null)
             {
-                throw new ArgumentNullException("q");
+                throw new ArgumentNullException("x");
             }
 
-            if (r.Length != rowsR * columnsR)
+            if (work == null)
             {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "r");
+                throw new ArgumentNullException("work");
             }
 
-            if (q.Length != rowsR * rowsR)
+            if (a.Length != rows * columns)
             {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "q");
+                throw new ArgumentException(Resources.ArgumentArraysSameLength, "a");
             }
 
-            if (b.Length != rowsR * columnsB)
+            if (b.Length != rows * columnsB)
             {
                 throw new ArgumentException(Resources.ArgumentArraysSameLength, "b");
             }
 
-            if (x.Length != columnsR * columnsB)
+            if (x.Length != columns * columnsB)
             {
                 throw new ArgumentException(Resources.ArgumentArraysSameLength, "x");
             }
 
-            if (work.Length < rowsR * rowsR)
+            if (rows < columns)
             {
-                work[0] = rowsR * rowsR;
+                throw new ArgumentException(Resources.RowsLessThanColumns);
+            }
+
+            if (work.Length < rows * rows)
+            {
+                work[0] = rows * rows;
                 throw new ArgumentException(Resources.WorkArrayTooSmall, "work");
             }
 
-            QRFactor(r, rowsR, columnsR, q, work);
-            QRSolveFactored(q, r, rowsR, columnsR, b, columnsB, x);
+            var clone = new Complex32[a.Length];
+            a.Copy(clone);
+            var q = new Complex32[rows * rows];
+            QRFactor(clone, rows, columns, q, work);
+            QRSolveFactored(q, clone, rows, columns, null, b, columnsB, x);
 
-            work[0] = rowsR * rowsR;
+            work[0] = rows * rows;
+        }
+
+        /// <summary>
+        /// Solves A*X=B for X using a previously QR factored matrix.
+        /// </summary>
+        /// <param name="q">The Q matrix obtained by QR factor. This is only used for the managed provider and can be
+        /// <c>null</c> for the native provider. The native provider uses the Q portion stored in the R matrix.</param>
+        /// <param name="r">The R matrix obtained by calling <see cref="QRFactor(Complex32[],int,int,Complex32[],Complex32[])"/>. </param>
+        /// <param name="rowsR">The number of rows in the A matrix.</param>
+        /// <param name="columnsR">The number of columns in the A matrix.</param>
+        /// <param name="tau">Contains additional information on Q. Only used for the native solver
+        /// and can be <c>null</c> for the managed provider.</param>
+        /// <param name="b">On entry the B matrix; on exit the X matrix.</param>
+        /// <param name="columnsB">The number of columns of B.</param>
+        /// <param name="x">On exit, the solution matrix.</param>
+        /// <param name="work">The work array - only used in the native provider. The array must have a length of at least N,
+        /// but should be N*blocksize. The blocksize is machine dependent. On exit, work[0] contains the optimal
+        /// work size value.</param>
+        /// <remarks>Rows must be greater or equal to columns.</remarks>
+        public virtual void QRSolveFactored(Complex32[] q, Complex32[] r, int rowsR, int columnsR, Complex32[] tau, Complex32[] b, int columnsB, Complex32[] x, Complex32[] work)
+        {
+            QRSolveFactored(q, r, rowsR, columnsR, tau, b, columnsB, x);
         }
 
         /// <summary>
@@ -1699,10 +1721,13 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
         /// <param name="r">The R matrix obtained by calling <see cref="QRFactor(Complex32[],int,int,Complex32[],Complex32[])"/>. </param>
         /// <param name="rowsR">The number of rows in the A matrix.</param>
         /// <param name="columnsR">The number of columns in the A matrix.</param>
+        /// <param name="tau">Contains additional information on Q. Only used for the native solver
+        /// and can be <c>null</c> for the managed provider.</param>
         /// <param name="b">The B matrix.</param>
         /// <param name="columnsB">The number of columns of B.</param>
         /// <param name="x">On exit, the solution matrix.</param>
-        public virtual void QRSolveFactored(Complex32[] q, Complex32[] r, int rowsR, int columnsR, Complex32[] b, int columnsB, Complex32[] x)
+        /// <remarks>Rows must be greater or equal to columns.</remarks>
+        public virtual void QRSolveFactored(Complex32[] q, Complex32[] r, int rowsR, int columnsR, Complex32[] tau, Complex32[] b, int columnsB, Complex32[] x)
         {
             if (r == null)
             {
@@ -1731,7 +1756,7 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
 
             if (q.Length != rowsR * rowsR)
             {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "q");
+                throw new ArgumentException(string.Format(Resources.ArgumentArrayWrongLength, "rowsR * rowsR"), "q");
             }
 
             if (b.Length != rowsR * columnsB)
@@ -1742,6 +1767,11 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
             if (x.Length != columnsR * columnsB)
             {
                 throw new ArgumentException(Resources.ArgumentArraysSameLength, "x");
+            }
+
+            if (rowsR < columnsR)
+            {
+                throw new ArgumentException(Resources.RowsLessThanColumns);
             }
 
             var sol = new Complex32[b.Length];
@@ -1853,8 +1883,7 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
                 throw new ArgumentException(Resources.ArgumentArraysSameLength, "s");
             }
 
-            // Actually "work = new Complex32[aRows]" is acceptable size of work array. I set size proposed in method description
-            var work = new Complex32[(2 * Math.Min(rowsA, columnsA)) + Math.Max(rowsA, columnsA)];
+            var work = new Complex32[rowsA];
             SingularValueDecomposition(computeVectors, a, rowsA, columnsA, s, u, vt, work);
         }
 
@@ -1870,9 +1899,7 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
         /// singular vectors.</param>
         /// <param name="vt">If <paramref name="computeVectors"/> is <c>true</c>, on exit VT contains the transposed
         /// right singular vectors.</param>
-        /// <param name="work">The work array. For real matrices, the work array should be at least
-        /// Max(3*Min(M, N) + Max(M, N), 5*Min(M,N)). For complex matrices, 2*Min(M, N) + Max(M, N).
-        /// On exit, work[0] contains the optimal work size value.</param>
+        /// <param name="work">The work array. Length should be at least <paramref name="rowsA"/>.</param>
         /// <remarks>This is equivalent to the GESVD LAPACK routine.</remarks>
         public virtual void SingularValueDecomposition(bool computeVectors, Complex32[] a, int rowsA, int columnsA, Complex32[] s, Complex32[] u, Complex32[] vt, Complex32[] work)
         {
@@ -2547,35 +2574,17 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
         /// <summary>
         /// Solves A*X=B for X using the singular value decomposition of A.
         /// </summary>
-        /// <param name="a">On entry, the M by N matrix to decompose. On exit, A may be overwritten.</param>
+        /// <param name="a">On entry, the M by N matrix to decompose.</param>
         /// <param name="rowsA">The number of rows in the A matrix.</param>
         /// <param name="columnsA">The number of columns in the A matrix.</param>
-        /// <param name="s">The singular values of A in ascending value.</param>
-        /// <param name="u">On exit U contains the left singular vectors.</param>
-        /// <param name="vt">On exit VT contains the transposed right singular vectors.</param>
         /// <param name="b">The B matrix.</param>
         /// <param name="columnsB">The number of columns of B.</param>
         /// <param name="x">On exit, the solution matrix.</param>
-        public virtual void SvdSolve(Complex32[] a, int rowsA, int columnsA, Complex32[] s, Complex32[] u, Complex32[] vt, Complex32[] b, int columnsB, Complex32[] x)
+        public virtual void SvdSolve(Complex32[] a, int rowsA, int columnsA, Complex32[] b, int columnsB, Complex32[] x)
         {
             if (a == null)
             {
                 throw new ArgumentNullException("a");
-            }
-
-            if (s == null)
-            {
-                throw new ArgumentNullException("s");
-            }
-
-            if (u == null)
-            {
-                throw new ArgumentNullException("u");
-            }
-
-            if (vt == null)
-            {
-                throw new ArgumentNullException("vt");
             }
 
             if (b == null)
@@ -2588,21 +2597,6 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
                 throw new ArgumentNullException("x");
             }
 
-            if (u.Length != rowsA * rowsA)
-            {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "u");
-            }
-
-            if (vt.Length != columnsA * columnsA)
-            {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "vt");
-            }
-
-            if (s.Length != Math.Min(rowsA, columnsA))
-            {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "s");
-            }
-
             if (b.Length != rowsA * columnsB)
             {
                 throw new ArgumentException(Resources.ArgumentArraysSameLength, "b");
@@ -2613,95 +2607,14 @@ namespace MathNet.Numerics.Algorithms.LinearAlgebra
                 throw new ArgumentException(Resources.ArgumentArraysSameLength, "b");
             }
 
-            // TODO: Actually "work = new double[aRows]" is acceptable size of work array. I set size proposed in method description
-            var work = new Complex32[(2 * Math.Min(rowsA, columnsA)) + Math.Max(rowsA, columnsA)];
-            SvdSolve(a, rowsA, columnsA, s, u, vt, b, columnsB, x, work);   
-        }
+            var work = new Complex32[rowsA];
+            var s = new Complex32[Math.Min(rowsA, columnsA)];
+            var u = new Complex32[rowsA * rowsA];
+            var vt = new Complex32[columnsA * columnsA];
 
-        /// <summary>
-        /// Solves A*X=B for X using the singular value decomposition of A.
-        /// </summary>
-        /// <param name="a">On entry, the M by N matrix to decompose. On exit, A may be overwritten.</param>
-        /// <param name="rowsA">The number of rows in the A matrix.</param>
-        /// <param name="columnsA">The number of columns in the A matrix.</param>
-        /// <param name="s">The singular values of A in ascending value.</param>
-        /// <param name="u">On exit U contains the left singular vectors.</param>
-        /// <param name="vt">On exit VT contains the transposed right singular vectors.</param>
-        /// <param name="b">The B matrix.</param>
-        /// <param name="columnsB">The number of columns of B.</param>
-        /// <param name="x">On exit, the solution matrix.</param>
-        /// <param name="work">The work array. For real matrices, the work array should be at least
-        /// Max(3*Min(M, N) + Max(M, N), 5*Min(M,N)). For complex matrices, 2*Min(M, N) + Max(M, N).
-        /// On exit, work[0] contains the optimal work size value.</param>
-        public virtual void SvdSolve(Complex32[] a, int rowsA, int columnsA, Complex32[] s, Complex32[] u, Complex32[] vt, Complex32[] b, int columnsB, Complex32[] x, Complex32[] work)
-        {
-            if (a == null)
-            {
-                throw new ArgumentNullException("a");
-            }
-
-            if (s == null)
-            {
-                throw new ArgumentNullException("s");
-            }
-
-            if (u == null)
-            {
-                throw new ArgumentNullException("u");
-            }
-
-            if (vt == null)
-            {
-                throw new ArgumentNullException("vt");
-            }
-
-            if (b == null)
-            {
-                throw new ArgumentNullException("b");
-            }
-
-            if (x == null)
-            {
-                throw new ArgumentNullException("x");
-            }
-
-            if (u.Length != rowsA * rowsA)
-            {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "u");
-            }
-
-            if (vt.Length != columnsA * columnsA)
-            {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "vt");
-            }
-
-            if (s.Length != Math.Min(rowsA, columnsA))
-            {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "s");
-            }
-
-            if (b.Length != rowsA * columnsB)
-            {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "b");
-            }
-
-            if (x.Length != columnsA * columnsB)
-            {
-                throw new ArgumentException(Resources.ArgumentArraysSameLength, "b");
-            }
-
-            if (work.Length == 0)
-            {
-                throw new ArgumentException(Resources.ArgumentSingleDimensionArray, "work");
-            }
-
-            if (work.Length < rowsA)
-            {
-                work[0] = rowsA;
-                throw new ArgumentException(Resources.WorkArrayTooSmall, "work");
-            }
-
-            SingularValueDecomposition(true, a, rowsA, columnsA, s, u, vt, work);
+            var clone = new Complex32[a.Length];
+            a.Copy(clone);
+            SingularValueDecomposition(true, clone, rowsA, columnsA, s, u, vt, work);
             SvdSolveFactored(rowsA, columnsA, s, u, vt, b, columnsB, x);
         }
 

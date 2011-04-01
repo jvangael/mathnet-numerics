@@ -253,7 +253,7 @@ namespace MathNet.Numerics.LinearAlgebra.Generic
         /// </returns>
         public override string ToString()
         {
-            return ToString(null, null);
+            return ToString(null);
         }
 
         /// <summary>
@@ -1349,7 +1349,7 @@ namespace MathNet.Numerics.LinearAlgebra.Generic
         /// <returns>
         /// A <see cref="System.String"/> that represents this instance.
         /// </returns>
-        public virtual string ToString(string format, IFormatProvider formatProvider)
+        public virtual string ToString(string format, IFormatProvider formatProvider = null)
         {
             var stringBuilder = new StringBuilder();
             for (var row = 0; row < RowCount; row++)
@@ -1780,15 +1780,10 @@ namespace MathNet.Numerics.LinearAlgebra.Generic
                     return false;
                 }
 
-                for (var row = 1; row < RowCount; row++)
+                for (var row = 0; row < RowCount; row++)
                 {
-                    for (var column = 0; column < ColumnCount; column++)
+                    for (var column = row + 1; column < ColumnCount; column++)
                     {
-                        if (column >= row)
-                        {
-                            continue;
-                        }
-
                         if (!At(row, column).Equals(At(column, row)))
                         {
                             return false;
